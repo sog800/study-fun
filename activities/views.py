@@ -123,7 +123,7 @@ class LessonsListView(generics.ListAPIView):
 @permission_classes([IsAuthenticated])
 def grade_quiz(request, pk):
     try:
-        lesson = Lesson.objects.get(pk=pk, created_by=request.user)
+        lesson = Lesson.objects.get(pk=pk)
     except Lesson.DoesNotExist:
         return Response({"error": "Lesson not found"}, status=status.HTTP_404_NOT_FOUND)
     
