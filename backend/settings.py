@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-er+cdw780o-tm*mmx*)j9!&*v(7e-qnz!%k9$7hy7)mjan9b$y
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ['study-fun.onrender.com', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['*', 'https://stud-fun.onrender.com']
 
 
 # Application definition
@@ -178,13 +178,15 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [
+    'https://study-fun.vercel.app',
+    'https://stud-fun.onrender.com',
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
 
 # Or for development, you can use:
 # CORS_ALLOW_ALL_ORIGINS = True  # Only for development!
-CORS_ALLOW_ALL_ORIGINS = True
+
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOWED_HEADERS = [
