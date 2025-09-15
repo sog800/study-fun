@@ -184,7 +184,7 @@ CORS_ALLOWED_ORIGINS = [
 
 # Or for development, you can use:
 # CORS_ALLOW_ALL_ORIGINS = True  # Only for development!
-
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOWED_HEADERS = [
