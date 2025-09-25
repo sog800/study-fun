@@ -73,8 +73,8 @@ REST_FRAMEWORK = {
 from rest_framework_simplejwt.settings import api_settings
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),  # Access token lasts 1 hour
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),    # Refresh token lasts 30 days
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=30),  # Access token lasts 1 hour
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=60),    # Refresh token lasts 30 days
     'ROTATE_REFRESH_TOKENS': True,                   # Generate new refresh token on refresh
     'BLACKLIST_AFTER_ROTATION': True,               # Blacklist old refresh tokens
     'UPDATE_LAST_LOGIN': True,
