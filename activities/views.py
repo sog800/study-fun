@@ -55,41 +55,55 @@ class LessonCreateView(generics.CreateAPIView):
                 content = self.extract_text_from_pptx(uploaded_file)
             else:
                 return Response({"error": "Unsupported file type"}, status=status.HTTP_400_BAD_REQUEST)
-
         else:
             return Response({"error": "Provide either text or file"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 1. Chunk the content into slides
-        chunks = chunk_text(content, max_length=400)  # smaller for slides
+        # NEW FLOW:
+        # 1. Send full raw content to AI to simplify/explain (no pre-chunking)
+        explain_prompt = f"""
+You are an expert educator. Rewrite the following lesson in clear, simple English suitable for students.
 
-        explained_chunks = []
-        for chunk in chunks:
-            prompt = f"""
-            Explain the following text in clear, simple English for students. 
-            - Break it into small paragraphs. 
-            - Retain key scientific terms but explain them in parentheses, e.g. "Homeostasis (keeping balance in the body)". 
+Requirements:
+- Preserve logical structure (keep/normalize headings).
+- Break long paragraphs into smaller ones (2–4 sentences each).
+- Keep key scientific / technical terms but add a short parenthetical explanation the first time they appear, e.g., Homeostasis (the body's balance).
+- Use a neutral, encouraging tone.
+- Keep essential definitions and relationships.
+- Do NOT omit important concepts.
+- Return ONLY the rewritten lesson text (no extra commentary).
 
-            Text:
-            {chunk}
-            """
-            explained_chunks.append(call_ai(prompt))
+Original Lesson:
+{content}
+"""
+        explained_lesson = call_ai(explain_prompt).strip()
 
-        # 2. Combine for quiz generation
-        combined_text = " ".join(explained_chunks)
+        # 2. Generate quiz based on the full simplified lesson (still unchunked)
         quiz_prompt = f"""
-        Create a multiple-choice quiz based on the following lesson.  
-        - Each question should have 4 options (A, B, C, D). 
-        - Clearly mark the correct answer.
+Create a comprehensive multiple-choice quiz that tests deep understanding of the lesson below.
 
-        Lesson:
-        {combined_text}
-        """
-        quiz = call_ai(quiz_prompt)
+Requirements:
+- 12–20 questions (enough to cover all core concepts).
+- Each question has 4 options labeled A, B, C, D.
+- After each question (or its options), clearly mark the correct option using the format: Correct: B
+- Mix question types: definition, application, scenario, cause-effect, comparison.
+- Avoid trivial recall; emphasize reasoning.
+- Do not repeat concepts verbatim.
+- Keep formatting clean and consistent.
 
-        # 3. Save lesson
+Lesson:
+{explained_lesson}
+"""
+        quiz = call_ai(quiz_prompt).strip()
+
+        # 3. Chunk the simplified lesson into slides for frontend display
+        slides = chunk_text(explained_lesson, max_length=400)
+        if not slides:
+            slides = [explained_lesson]
+
+        # 4. Save lesson
         lesson = Lesson.objects.create(
             title=title,
-            topic=explained_chunks,  # list of slides
+            topic=slides,   # list of slide-sized chunks
             quiz=quiz,
             created_by=request.user,
         )
@@ -176,9 +190,9 @@ def grade_quiz(request, pk):
     1. Encouraging feedback (2-3 sentences)
     2. Areas for improvement if score < 70%
     3. Congratulations if score >= 70%
-    
-    Keep it positive and educational.
-    
+
+    Keep it positive, educational and short.
+
     {quiz_summary}
     """
     
