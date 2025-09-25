@@ -28,7 +28,7 @@ SECRET_KEY = 'django-insecure-er+cdw780o-tm*mmx*)j9!&*v(7e-qnz!%k9$7hy7)mjan9b$y
 DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = [
-    'stud-fun.onrender.com',
+    'study-fun.onrender.com', 
     'study-fun.vercel.app',
     'localhost',
     '127.0.0.1',
