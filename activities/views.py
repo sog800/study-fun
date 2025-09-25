@@ -12,6 +12,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 import json
+import re
 
 class LessonCreateView(generics.CreateAPIView):
     queryset = Lesson.objects.all()
@@ -37,16 +38,52 @@ class LessonCreateView(generics.CreateAPIView):
                     text.append(shape.text)
         return " ".join(text)
 
+    def _split_for_model(self, content: str, max_chars: int):
+        """
+        Split content into chunks <= max_chars trying to respect paragraph boundaries.
+        """
+        if len(content) <= max_chars:
+            return [content]
+        paragraphs = re.split(r'\n{2,}|\r\n{2,}', content)
+        chunks = []
+        current = []
+        current_len = 0
+        for p in paragraphs:
+            p = p.strip()
+            if not p:
+                continue
+            # +2 for the blank line joiner
+            add_len = len(p) + 2
+            if current_len + add_len > max_chars and current:
+                chunks.append("\n\n".join(current))
+                current = [p]
+                current_len = len(p)
+            else:
+                current.append(p)
+                current_len += add_len
+        if current:
+            chunks.append("\n\n".join(current))
+        # Final safety split (hard cut) if any residual > max_chars
+        fixed = []
+        for c in chunks:
+            if len(c) <= max_chars:
+                fixed.append(c)
+            else:
+                for i in range(0, len(c), max_chars):
+                    fixed.append(c[i:i+max_chars])
+        return fixed
+
     def create(self, request, *args, **kwargs):
         title = request.data.get("title")
         raw_topic = request.data.get("topic")
         uploaded_file = request.FILES.get("file")
 
-        # Case 1: Text provided
+        if not title:
+            return Response({"error": "Title required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Acquire raw content (text or file)
         if raw_topic:
             content = raw_topic
-
-        # Case 2: File uploaded
         elif uploaded_file:
             ext = os.path.splitext(uploaded_file.name)[1].lower()
             if ext == ".pdf":
@@ -58,56 +95,118 @@ class LessonCreateView(generics.CreateAPIView):
         else:
             return Response({"error": "Provide either text or file"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # NEW FLOW:
-        # 1. Send full raw content to AI to simplify/explain (no pre-chunking)
-        explain_prompt = f"""
+        content = content.strip()
+        if not content:
+            return Response({"error": "Empty content"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Model-safe per-pass character limit (fits prompt + output in model context)
+        PER_PASS_LIMIT = 12000  # adjust if needed based on model context
+        parts = self._split_for_model(content, PER_PASS_LIMIT)
+        total_parts = len(parts)
+
+        simplified_parts = []
+
+        if total_parts == 1:
+            # Single pass (original flow)
+            explain_prompt = f"""
 You are an expert educator. Rewrite the following lesson in clear, simple English suitable for students.
 
 Requirements:
 - Preserve logical structure (keep/normalize headings).
 - Break long paragraphs into smaller ones (2–4 sentences each).
-- Keep key scientific / technical terms but add a short parenthetical explanation the first time they appear, e.g., Homeostasis (the body's balance).
-- Use a neutral, encouraging tone.
+- Keep key scientific / technical terms but add a short parenthetical explanation the first time they appear.
+- Neutral, encouraging tone.
 - Keep essential definitions and relationships.
 - Do NOT omit important concepts.
-- Return ONLY the rewritten lesson text (no extra commentary).
+- Return ONLY the rewritten lesson text (no extra commentary, no concluding summary section).
 
 Original Lesson:
-{content}
+{parts[0]}
 """
-        explained_lesson = call_ai(explain_prompt).strip()
+            explained_full = call_ai(explain_prompt).strip()
+        else:
+            # Multi-pass streaming
+            for idx, part in enumerate(parts, start=1):
+                if idx == 1:
+                    role_instructions = f"""This is Part {idx} of {total_parts}. More parts will follow."""
+                    intro_rule = "Do NOT write an overall introduction or conclusion."
+                elif idx == total_parts:
+                    role_instructions = f"""This is Part {idx} of {total_parts} (final)."""
+                    intro_rule = "Do NOT add a final conclusion or summary; just rewrite this part."
+                else:
+                    role_instructions = f"""This is Part {idx} of {total_parts} (middle)."""
+                    intro_rule = "Do NOT add an introduction or conclusion; continue seamlessly."
 
-        # 2. Generate quiz based on the full simplified lesson (still unchunked)
+                part_prompt = f"""
+You are an expert educator rewriting a large lesson in sequential parts.
+
+{role_instructions}
+
+Guidelines:
+- Preserve existing logical/heading structure (adjust numbering if needed).
+- Break long paragraphs (2–4 sentences).
+- First occurrence of key technical terms: add short parenthetical explanation.
+- Keep definitions, relationships, and important concepts.
+- Maintain neutral, encouraging tone.
+- {intro_rule}
+- Do NOT reference other parts explicitly.
+- Return ONLY rewritten content of this part (no extra commentary).
+
+Original Part Text:
+{part}
+"""
+                rewritten = call_ai(part_prompt).strip()
+                # Light cleanup to reduce duplicate leading headings like "Introduction"
+                simplified_parts.append(rewritten)
+
+            # Merge parts then run a normalization pass to remove duplicated headings/intro snippets
+            merged = "\n\n".join(simplified_parts)
+            normalize_prompt = f"""
+You are an expert editor.
+
+Task:
+Merge the following rewritten lesson fragments into a single cohesive lesson.
+
+Rules:
+- Remove duplicate introductions or repeated headings.
+- Keep a single coherent flow of sections.
+- Preserve all concepts.
+- Keep parenthetical explanations already present.
+- Do NOT add a concluding summary section.
+- Return ONLY the cleaned unified lesson.
+
+Fragments:
+{merged}
+"""
+            explained_full = call_ai(normalize_prompt).strip()
+
+        # Generate quiz from unified simplified lesson
         quiz_prompt = f"""
 Create a comprehensive multiple-choice quiz that tests deep understanding of the lesson below.
 
 Requirements:
-- 12–20 questions (enough to cover all core concepts).
+- 12–20 questions.
 - Each question has 4 options labeled A, B, C, D.
-- After each question (or its options), clearly mark the correct option using the format: Correct: B
+- After each question (or its options), clearly mark the correct option using: Correct: B
 - Mix question types: definition, application, scenario, cause-effect, comparison.
 - Avoid trivial recall; emphasize reasoning.
-- Do not repeat concepts verbatim.
+- Do not repeat wording verbatim.
 - Keep formatting clean and consistent.
 
 Lesson:
-{explained_lesson}
+{explained_full}
 """
         quiz = call_ai(quiz_prompt).strip()
 
-        # 3. Chunk the simplified lesson into slides for frontend display
-        slides = chunk_text(explained_lesson, max_length=400)
-        if not slides:
-            slides = [explained_lesson]
+        # Chunk final simplified lesson for slides
+        slides = chunk_text(explained_full, max_length=400) or [explained_full]
 
-        # 4. Save lesson
         lesson = Lesson.objects.create(
             title=title,
-            topic=slides,   # list of slide-sized chunks
+            topic=slides,
             quiz=quiz,
             created_by=request.user,
         )
-
         serializer = LessonSerializer(lesson)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 

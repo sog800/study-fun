@@ -10,7 +10,7 @@ def call_ai(prompt):
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "openai/gpt-3.5-turbo",  # or another free model from openrouter
+        "model": "openai/gpt-3.5-turbo",  # model name
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
     }
