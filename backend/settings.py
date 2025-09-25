@@ -32,6 +32,7 @@ ALLOWED_HOSTS = [
     'study-fun.vercel.app',
     'localhost',
     '127.0.0.1',
+    '*',
 ]
 
 
